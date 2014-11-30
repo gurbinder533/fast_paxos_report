@@ -136,7 +136,8 @@ In our implementation of Fast Paxos, each server can take following roles:
 \noindent It must be pointed out that the role of leader in Fast Paxos is totally different from that in Classic Paxos. In Classic Paxos, the leader is responsible for serializing the commands in global order by assigning an unique Instance ID (namely timestamp or slot number) when proposing a new value. While in Fast Paxos, the leader is responsible for proposing values when a conflict occurs, that is, when two proposers are trying to propose different values to the same command slot. Leader is checking the progress of the protocol periodically and doing arbitration if it sees a conflict. To be able to detect the conflicts, the leader must also be a learner.    
 
 \subsection{Message Flows}
-\noindent The normal-case communication pattern in Paxos protocol is proposer → leader → acceptors → learners. In Fast Paxos, the proposer send its proposal to acceptors directly. bypassing the leader and saving one message delay. So the message flow is proposer → acceptors → learners. However. 
+\noindent The normal-case communication pattern in Paxos protocol is proposer → leader → acceptors → learners. In Fast Paxos, the proposer send its proposal to acceptors directly. bypassing the leader and saving one message delay. So the message flow is proposer → acceptors → learners. 
+\todo{Either fix this or remove this.}
 \\
 
 \subsection{Normal Operation}
@@ -148,22 +149,24 @@ In our implementation of Fast Paxos, each server can take following roles:
 \label{normalpax}
 \end{figure}
 
-\todo{Add figure number here.}
-As shown in \textbf{Figure 1}, Leader on start up and on regular timeouts, sends a phase 1a batch message $PREPARE<ballot, iids>$ to acceptors for $N$ (configurable) $iids(instance\_id)$. Ballot number used in this message is bigger than any ballot number used by other proposers.On receiving this batch message, acceptors do the following:
+\subsubsection{Phase 1a}
+As shown in \textbf{Figure \ref{normalpax}}, Leader on start up and on regular timeouts, sends a phase 1a batch message $PREPARE<ballot, iids>$ to acceptors for $N$ (configurable) $iids(instance\_id)$. Ballot number used in this message is bigger than any ballot number used by other proposers.On receiving this batch message, acceptors do the following:
 \begin{enumerate}
 \item if record is not found in the acceptor log, it needs to be created with the received ballot number. 
 \item if record exists, it updates the ballot number in the record found in the log to the larger ballot number (received or already present in the record).
 \end{enumerate}
 \noindent
-After processing this message, it sends back the $PROMISE<iid, ballot, value>$ to the leader, where value could be either $NULL$ or some accepted value for that $iid$.\\
+After processing this message, it sends back the $PROMISE<iid, \, ballot, \, value>$ to the leader, where value could be either $NULL$ or some accepted value for that $iid$.\\
 
+\subsubsection{Phase 1b}
 \noindent 
-Leader on receiving phase 1b batch message $PROMISE<iid, ballot, value>$ from acceptors do the following:
+Leader on receiving phase 1b batch message $PROMISE<iid, \, ballot, \, value>$ from acceptors do the following:
 \begin{enumerate}
 \item it checks for the quorum condition for given iid, if true it broadcasts the $ANY\_VAL<iid>$ batch message. This pre-executes the $Phase1$ of Classic Paxos and sets stage for Fast Paxos.
 \item if the quorum condition is not reached, on timeout it resends the $PREPARE$ batch message.
 \end{enumerate}
 
+\subsubsection{Phase 2a}
 \noindent
 Acceptors on receiving $ANY\_VAL<iid>$ message do the following:
 \begin{enumerate}
@@ -174,9 +177,10 @@ Acceptors on receiving $ANY\_VAL<iid>$ message do the following:
 \noindent
 Proposers on receiving request from client, do the following:
 \begin{enumerate}
-\item they assign their ballot number($fixed ballot$) and send an $ACCEPT<iid, ballot, value>$ message to all acceptors directly(fast round).
+\item they assign their ballot number($fixed ballot$) and send an $ACCEPT<iid, \, ballot, \, value>$ message to all acceptors directly(fast round).
 \end{enumerate}
 
+\subsubsection{Phase 2b}
 \noindent
 On receiving accept message, acceptors do the following:
 \begin{enumerate}
@@ -185,7 +189,7 @@ On receiving accept message, acceptors do the following:
 \item in all other cases, the message is ignored (could be due to conflicts, retransmission or delayed message).
 \end{enumerate}
 
-After updating the log, acceptors broadcast the $LEARN<iid, value, ballot>$. \\
+After updating the log, acceptors broadcast the $LEARN<iid, \, value, \, ballot>$. \\
 \noindent
 Learners (including leader and proposers) on receiving the $LEARN$ message, do the following:
 \begin{enumerate}
@@ -204,8 +208,51 @@ Conflicts may happen if all of the following events happen:
 \end{enumerate}
 
 \noindent
-The leader detects the progress of the protocol periodically, if nothing get delivered from propose, it send a $PREPARE<iid>$ 
+The leader detects the progress of the protocol periodically using a timeout mechanism, if nothing gets delivered from learner, 
+\begin{enumerate}
+\item It broadcasts a $PREPARE<ballot,\,currrent\_iid>$, where current\_iid is the next iid to deliver by learner, and $ballot$ is a higher ballot number to indicate its conflict resolution purpose. 
+\item Acceptors upon receiving $PREPARE<ballot,\, currrent\_iid>$, reply with $PROMISE<iid,\, value\_ballot,\, accepted\_value>$.
+\item The leader upon receiving the $PROMISE<iid,\, value\_ballot,\,\\ accepted\_value>$, updates its in-memory records and check the quorum condition, if true, it picks the value with the highest $value\_ballot$ and broadcasts the $ACCEPT<iid, \, ballot,\, chosen\_value>$ to acceptors
+\item Acceptors upon receiving this $ACCEPT<iid, \, ballot,\, chosen\_value>$ message, the condition of case 2 in $2.3.4$ will be true and the value is accepted and learn message will be broadcasted as normal. 
+\item Eventually one of the proposers will get notified by learners that its proposal is granted, other proposers (losers) will retry with next $iid$ by broadcasting $ACCEPT<iid+1, \, ballot, \, value>$ nessage to acceptors
+\end{enumerate}
 
+\subsection{Retransmissions:}
+There are several retransmissions in the protocol to ensure liveness and tolerate message losses:
+\subsubsection{Leader $PREPARE$ retransmission:}
+Leader maintains a state of all the expected $PROMISE$ messages for all $PREPARE$ messages. On timeout, leader rebroadcasts the $PREPARE$ messages for those $PROMISE$ messages for which the quorum condition is not satisfied.
+\subsubsection{Learners $LSYNC$ message:}
+Learner maintains a state of all the expected $LEARN$ messages, and sends $LSYNC$ message for all $iids$ for which quorum condition is not satisfied. \\
+
+\noindent Acceptor on receiving this message will reply with $LEARN<iid,\, \\accepted\_value,\, ballot>$ for each iid.
+
+\subsubsection{Proposers $ACCEPT$ retransmission:}
+Proposer maintains the state of the current value it is trying to propose and retransmit it on timeout. The timeout will be cancelled if the value get delivered.
+
+\subsubsection{Client request retransmission:}
+Each proposer can only handle one client at a time, so if a proposer receives requests from another client while it is processing a client's request, it simply drops the message. Client on timeout, retransmits the request.
+
+\section{Implementation Differences:}
+
+\begin{enumerate}
+\item  In \textit{Libfastpaxos}, each role is a separate process. Each proposer spawns a learner thread and main thread acts as proposer. One of the proposers (pre-defined) acts as a leader and each acceptor is a process of its own. In our implementation, there's only one entity called \texttt{paxserver} that acts as leader, learner, acceptor and proposer.
+\item They use real time to do timeouts using \texttt{libevent} library whereas simulator has a different notion of time and we use counters in each instance to do timeouts.
+\item They use Berkley DB as a persistent log in acceoptors whereas we use in-memory \texttt{paxlog} as our acceptor log.
+\item In {\textit{Libfastpaxos}, client and proposer are running as two threads in same process and using shared variables for synchronization. Hence, they cannot have multiple clients connecting to same proposer, and each proposer has a predefined FIFO request queue. In our implementation, client is independent of the paxos server system and communicates using message passing. Request may duplicate over different proposers. In proposer deliver call back, we use request id and client id instead of proposer id to detect if proposer needs to repropose its request with a higher instance id.
+\end{enumerate}
+
+\section{Test and Results:}
+\subsection{base case:}
+\subsection{conflict resolving:}
+\subsection{leader paused and unpaused:}
+\subsection{multiple proposers:}
+
+\section{Limitations or corner cases:}
+\begin{enumerate}
+\item Our paxos server system implementation does not count client as a learner, so client has no information about the granted $iids$ and next iid to try. That's the reason for client proposing value through proposers and not directly to acceptors.
+
+\item If a client times out and tries a different proposer but the previous request of client succeeds and the new proposer fails to receive the update for that request, it will re-propose the value with new $iid$. One possible solution for this is for proposer to sync with acceptors to learn about the different requests for this client. Since we maintain a finite size log, we couldn't implement this in given time.
+\end{enumerate}
 
 \begin{thebibliography}{100} 
 \bibitem{lamport} Lamport, Leslie (May 1998). "The Part-Time Parliament" \emph{ ACM Transactions on Computer Systems 16 (2): 133–169}
