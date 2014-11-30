@@ -197,9 +197,16 @@ Learners (including leader and proposers) on receiving the $LEARN$ message, do t
 \item On satisfying the quorum condition, they execute the request in the order of $iid$, deliver it (update the proposer state) and send back the response to client.
 \end{enumerate}
 
+\begin{figure}[ht!]
+\centering
+\includegraphics[width=160mm]{FP_with-conflict.png}
+\caption{Conflict Resolution of Fast Paxos Protocol}
+\label{conflictpax}
+\end{figure}
 
 \subsection{Resolving conflicts:}
-Conflicts may happen if all of the following events happen:
+
+As shown in \textbf{Figure \ref{conflictpax}}, conflicts may happen if all of the following events happen:
 
 \begin{enumerate}
 \item All acceptors received $ANY\_VAL$ message for a given $iid$
@@ -238,7 +245,7 @@ Each proposer can only handle one client at a time, so if a proposer receives re
 \item  In \textit{Libfastpaxos}, each role is a separate process. Each proposer spawns a learner thread and main thread acts as proposer. One of the proposers (pre-defined) acts as a leader and each acceptor is a process of its own. In our implementation, there's only one entity called \texttt{paxserver} that acts as leader, learner, acceptor and proposer.
 \item They use real time to do timeouts using \texttt{libevent} library whereas simulator has a different notion of time and we use counters in each instance to do timeouts.
 \item They use Berkley DB as a persistent log in acceoptors whereas we use in-memory \texttt{paxlog} as our acceptor log.
-\item In {\textit{Libfastpaxos}, client and proposer are running as two threads in same process and using shared variables for synchronization. Hence, they cannot have multiple clients connecting to same proposer, and each proposer has a predefined FIFO request queue. In our implementation, client is independent of the paxos server system and communicates using message passing. Request may duplicate over different proposers. In proposer deliver call back, we use request id and client id instead of proposer id to detect if proposer needs to repropose its request with a higher instance id.
+\item In \textit{Libfastpaxos}, client and proposer are running as two threads in same process and using shared variables for synchronization. Hence, they cannot have multiple clients connecting to same proposer, and each proposer has a predefined FIFO request queue. In our implementation, client is independent of the paxos server system and communicates using message passing. Request may duplicate over different proposers. In proposer deliver call back, we use request id and client id instead of proposer id to detect if proposer needs to repropose its request with a higher instance id.
 \end{enumerate}
 
 \section{Test and Results:}
@@ -256,7 +263,7 @@ Each proposer can only handle one client at a time, so if a proposer receives re
 
 \begin{thebibliography}{100} 
 \bibitem{lamport} Lamport, Leslie (May 1998). "The Part-Time Parliament" \emph{ ACM Transactions on Computer Systems 16 (2): 133–169}
-\bibitem{libfastpaxos} Marco Primi and Daniele Sciascia. "libfastpaxos" \emph{\url{http://libpaxos.sourceforge.net/paxos_projects.php\\#libfastpaxos}}
+\bibitem{libfastpaxos} Marco Primi and Daniele Sciascia. "libfastpaxos" \emph{\url{http://libpaxos.sourceforge.net/paxos_projects.php\#libfastpaxos}}
 \bibitem{fastpaxos} Lamport, Leslie (July 2005). "Fast Paxos" \emph{}
 \bibitem{flpresult} Fischer, Michael J; Nancy A. Lynch; Michael S. Paterson (April 1985)  "Impossibility of distributed consensus with one faulty process". \emph{Journal of the ACM 32}
 \end{thebibliography} 
