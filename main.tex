@@ -116,7 +116,7 @@ Paxos is a protocol for solving consensus in an asynchronous environment that ad
 
 The problem of agreeing on a sequence of operations or values proposed by different processes is known as the \textit{Distributed Consensus} problem. From \textit{FLP} result\cite{flpresult}, it is impossible to solve consensus in an asynchronous distributed system even if a single process fails by permanently stopping or if a distributed system suffers a \textit{Partial Failure}, in which processes may stop and recover later. Paxos is an algorithm that gets around this problem by making sure that the system doesn't violate the safety requirements during periods when system behaves asynchronously and is certain to make progress (liveliness) if the system behaves partially synchronously for periods long enough to satisfy the progress requirements.\\
 
-\noindent Classic Paxos and Fast Paxos are most widely studied algorithmic solutions to the problem of distributed consensus. Fast Paxos has smaller theoretical latency, therefore is faster, but Classic Paxos is more resilient and hence can tolerate more failures.
+\noindent Classic Paxos and Fast Paxos are most widely studied algorithmic solutions to the problem of distributed consensus. Fast Paxos has smaller theoretical message latency, therefore is faster, but Classic Paxos is more resilient and hence can tolerate more failures.
 In this project we ported the Fast Paxos algorithm on the simulator to study its behavior in the presence of different failure scenarios. 
 
 \section{Protocal Overview}
@@ -126,79 +126,90 @@ In this project we ported the Fast Paxos algorithm on the simulator to study its
 In our implementation of Fast Paxos, each server can take following roles:
 
 \begin{enumerate}
-\item {\textbf{Proposers} receives request from clients, associate it with the current slot number and send accept $\langle req, slot_num, ballot$\rangle.}
+\item {\textbf{Proposers} receive request from clients, associate it with the next slot number and broadcast accept $<Req, Instance ID, Ballot>$ rangle message to all acceptors}
 
-\item {\textbf{Acceptors} that accept proposals}
-\item {\textbf{Leader} A distinct proposer assumers the role of leader.}
+\item {\textbf{Acceptors}, in \textbf{fast round}, upon receiving accept message from proposer, they apply that request and broadcast learn message to all learners, In \textbf{classic round}, upon receiving a prepare message from leader, they apply it to log and reply with a promise message, upon receiving anyval message from leader, they apply it to log.}
+\item {\textbf{Leader} A distinct proposer assumes the role of leader. In \textbf{classic round}, it broadcasts prepare message to all acceptors and wait for a quorum number of promise messages, and then broadcasts anyval message to acceptors. In \textbf{fast round}, it detects the possible confliction and resolves it by initiating a classic round on given Instance ID}
+\item {\textbf{Learners} learn the accepted values from acceptors and check the quorum condition, once reached, they deliver the accepted in the order of Instance ID}
 \end{enumerate}
 
-%there are proposers that propose values, acceptors that accept proposals and learners that learn the outcome of the consensus. Servers can take on all three roles. \\
-
-\noindent A distinct proposer assumes the role of leader. In Classic Paxos, the leader is responsible for serializing the commands in global order by assigning an unique timestamp or slot number when proposing a new value. While in Fast Paxos, the leader is responsible for proposing values when a conflict occurs, that is, when two proposers are trying to propose different values to the same command slot. Leader is checking the progress of the protocol periodically and doing arbitration if it sees a conflict. To be able to detect the conflicts, the leader must also be a learner.    
+\noindent It must be pointed out that the role of leader in Fast Paxos is totally different from that in Classic Paxos. In Classic Paxos, the leader is responsible for serializing the commands in global order by assigning an unique Instance ID (namely timestamp or slot number) when proposing a new value. While in Fast Paxos, the leader is responsible for proposing values when a conflict occurs, that is, when two proposers are trying to propose different values to the same command slot. Leader is checking the progress of the protocol periodically and doing arbitration if it sees a conflict. To be able to detect the conflicts, the leader must also be a learner.    
 
 \subsection{Message Flows}
 \noindent The normal-case communication pattern in Paxos protocol is proposer → leader → acceptors → learners. In Fast Paxos, the proposer send its proposal to acceptors directly. bypassing the leader and saving one message delay. So the message flow is proposer → acceptors → learners. However. 
 \\
 
-\noindent 
+\subsection{Normal Operation}
 
-
-Use section and subsection commands to organize your document. \LaTeX{} handles all the formatting and numbering automatically. Use ref and label commands for cross-references.
-
-\subsection{Comments}
-
-Comments can be added to the margins of the document using the \todo{Here's a comment in the margin!} todo command, as shown in the example on the right. You can also add inline comments too:
-
-\todo[inline, color=green!40]{This is an inline comment.}
-
-\subsection{Tables and Figures}
-
-Use the table and tabular commands for basic tables --- see Table~\ref{tab:widgets}, for example. You can upload a figure (JPEG, PNG or PDF) using the files menu. To include it in your document, use the includegraphics command as in the code for Figure~\ref{fig:frog} below.
-
-% Commands to include a figure:
-\begin{figure}
+\begin{figure}[ht!]
 \centering
-\includegraphics[width=0.5\textwidth]{frog.jpg}
-\caption{\label{fig:frog}This is a figure caption.}
+\includegraphics[width=160mm]{FP_no-conflict.png}
+\caption{Normal operation of Fast Paxos Protocol}
+\label{normalpax}
 \end{figure}
 
-\begin{table}
-\centering
-\begin{tabular}{l|r}
-Item & Quantity \\\hline
-Widgets & 42 \\
-Gadgets & 13
-\end{tabular}
-\caption{\label{tab:widgets}An example table.}
-\end{table}
+\todo{Add figure number here.}
+As shown in \textbf{Figure 1}, Leader on start up and on regular timeouts, sends a phase 1a batch message $PREPARE<ballot, iids>$ to acceptors for $N$ (configurable) $iids(instance\_id)$. Ballot number used in this message is bigger than any ballot number used by other proposers.On receiving this batch message, acceptors do the following:
+\begin{enumerate}
+\item if record is not found in the acceptor log, it needs to be created with the received ballot number. 
+\item if record exists, it updates the ballot number in the record found in the log to the larger ballot number (received or already present in the record).
+\end{enumerate}
+\noindent
+After processing this message, it sends back the $PROMISE<iid, ballot, value>$ to the leader, where value could be either $NULL$ or some accepted value for that $iid$.\\
 
-\subsection{Mathematics}
+\noindent 
+Leader on receiving phase 1b batch message $PROMISE<iid, ballot, value>$ from acceptors do the following:
+\begin{enumerate}
+\item it checks for the quorum condition for given iid, if true it broadcasts the $ANY\_VAL<iid>$ batch message. This pre-executes the $Phase1$ of Classic Paxos and sets stage for Fast Paxos.
+\item if the quorum condition is not reached, on timeout it resends the $PREPARE$ batch message.
+\end{enumerate}
 
-\LaTeX{} is great at typesetting mathematics. Let $X_1, X_2, \ldots, X_n$ be a sequence of independent and identically distributed random variables with $\text{E}[X_i] = \mu$ and $\text{Var}[X_i] = \sigma^2 < \infty$, and let
-$$S_n = \frac{X_1 + X_2 + \cdots + X_n}{n}
-      = \frac{1}{n}\sum_{i}^{n} X_i$$
-denote their mean. Then as $n$ approaches infinity, the random variables $\sqrt{n}(S_n - \mu)$ converge in distribution to a normal $\mathcal{N}(0, \sigma^2)$.
+\noindent
+Acceptors on receiving $ANY\_VAL<iid>$ message do the following:
+\begin{enumerate}
+\item they update their persistent logs and set any\_enabled for each received $iid$ to true, which signifies that they can accept values from proposers directly (fast round).
+\item they wait for proposers to propose values.
+\end{enumerate}
 
-\subsection{Lists}
+\noindent
+Proposers on receiving request from client, do the following:
+\begin{enumerate}
+\item they assign their ballot number($fixed ballot$) and send an $ACCEPT<iid, ballot, value>$ message to all acceptors directly(fast round).
+\end{enumerate}
 
-You can make lists with automatic numbering \dots
+\noindent
+On receiving accept message, acceptors do the following:
+\begin{enumerate}
+\item case 1: if any enabled, they accept the message by updating their log.
+\item case 2: if any is not enabled and the accept is sent by leader, they accept the value if the ballot number is greater than the one in the record.
+\item in all other cases, the message is ignored (could be due to conflicts, retransmission or delayed message).
+\end{enumerate}
+
+After updating the log, acceptors broadcast the $LEARN<iid, value, ballot>$. \\
+\noindent
+Learners (including leader and proposers) on receiving the $LEARN$ message, do the following:
+\begin{enumerate}
+\item they update their in-memory log to check for duplicates and quorum condition.
+\item On satisfying the quorum condition, they execute the request in the order of $iid$, deliver it (update the proposer state) and send back the response to client.
+\end{enumerate}
+
+
+\subsection{Resolving conflicts:}
+Conflicts may happen if all of the following events happen:
 
 \begin{enumerate}
-\item Like this,
-\item and like this.
+\item All acceptors received $ANY\_VAL$ message for a given $iid$
+\item More than two proposer send $ACCEPT$ message with different value for that $iid$
+\item None of those $LEARN$ messages reach the quorum condition, which depends on the arrival order of $ACCEPT$ messages on acceptor side (acceptor only accepts the value in the first $ACCEPT$ message received). 
 \end{enumerate}
-\dots or bullet points \dots
-\begin{itemize}
-\item Like this,
-\item and like this.
-\end{itemize}
 
-We hope you find write\LaTeX\ useful, and please let us know if you have any feedback using the help menu above.
+\noindent
+The leader detects the progress of the protocol periodically, if nothing get delivered from propose, it send a $PREPARE<iid>$ 
 
 
 \begin{thebibliography}{100} 
 \bibitem{lamport} Lamport, Leslie (May 1998). "The Part-Time Parliament" \emph{ ACM Transactions on Computer Systems 16 (2): 133–169}
-\bibitem{libfastpaxos} Marco Primi and Daniele Sciascia. "libfastpaxos" \emph{\url{http://libpaxos.sourceforge.net/paxos_projects.php#libfastpaxos}}
+\bibitem{libfastpaxos} Marco Primi and Daniele Sciascia. "libfastpaxos" \emph{\url{http://libpaxos.sourceforge.net/paxos_projects.php\\#libfastpaxos}}
 \bibitem{fastpaxos} Lamport, Leslie (July 2005). "Fast Paxos" \emph{}
 \bibitem{flpresult} Fischer, Michael J; Nancy A. Lynch; Michael S. Paterson (April 1985)  "Impossibility of distributed consensus with one faulty process". \emph{Journal of the ACM 32}
 \end{thebibliography} 
