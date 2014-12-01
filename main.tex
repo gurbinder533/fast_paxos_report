@@ -137,7 +137,6 @@ In our implementation of Fast Paxos, each server can take following roles:
 
 \subsection{Message Flows}
 \noindent The normal-case communication pattern in Paxos protocol is proposer → leader → acceptors → learners. In Fast Paxos, the proposer send its proposal to acceptors directly. bypassing the leader and saving one message delay. So the message flow is proposer → acceptors → learners. 
-\todo{Either fix this or remove this.}
 \\
 
 \subsection{Normal Operation}
@@ -249,16 +248,76 @@ Each proposer can only handle one client at a time, so if a proposer receives re
 \end{enumerate}
 
 \section{Test and Results:}
-\subsection{base case:}
-\subsection{conflict resolving:}
-\subsection{leader paused and unpaused:}
-\subsection{multiple proposers:}
+\begin{figure}[ht!]
+\centering
+\includegraphics[width=160mm]{base_case.png}
+\caption{Client's view for base case}
+\label{basecase1}
+\end{figure}
 
-\section{Limitations or corner cases:}
+
+\begin{figure}[ht!]
+\centering
+\includegraphics[width=160mm]{base_case2.png}
+\caption{Paxos internal execution statistics}
+\label{basecase2}
+\end{figure}
+
+
+\subsection{Base Case: \texttt{2 clients, 3 servers, no delay or shuffle, requests 4} }
+This is the bare minimum configuration since there are no delays or shuffle, there will be no conflicts (conflict condition 3 of 2.4 will not be true). 
+
+Figure \ref{basecase1}, shows the response being sent to clients from servers (proposers). It shows that all 6 requests from different clients are executed in a fixed global order. Figure \ref{basecase2} shows that the logs are same on all 3 servers (acceptors).
+
+\begin{figure}[ht!]
+\centering
+\includegraphics[width=160mm]{conflicts.png}
+\caption{Part of the log showing conflicts being resolved by Leader}
+\label{conflicts}
+\end{figure}
+
+
+\subsection{Extreme Case: \texttt{16 clients, 24 servers, 100 shuffle, 90 delay } }
+Due to high shuffle and number of clients, there are higher number of conflicts and Figure \ref{conflicts} shows the conflicts being resolved by the leader.
+
+\begin{figure}[ht!]
+\centering
+\includegraphics[width=160mm]{resending.png}
+\caption{Part of the log showing conflicts being resolved by Leader}
+\label{resending}
+\end{figure}
+
+\subsection{leader paused and unpaused:}
+Figure \ref{resending} shows the case where leader is paused and then unpaused. During the time leader is paused, all live servers (proposers) keep retrying the accept message and as soon as leader comes back online, the protocol makes progress.
+
+\section{Timeouts}
+\subsection {Different types of timeout}
+The progress of the protocol depends on the several timeouts being used by the protocol. There are four timeouts being used:
+\begin{enumerate}
+\item \textbf{Leader Phase 1 timeout:} Leader uses this timeout to send the phase 1a ($PREPARE$) batch messages to pre-execute the phase 1 of classic paxos and guarantee the progress of phase 1 in case of message loss.
+\item \textbf{Leader Phase 2 timeout:} Leader uses this timeout to detect the progress of phase 2. If no progress has been made, it assumes that the conflicts happened for the current iid and it initiates the resolving conflict algorithm (section 2.4).
+\item \textbf{Proposer Timeout:} Proposer uses this timeout to retransmit the $ACCEPT$ message if it doesn't see a progress for current iid (i.e., if no value has been accepted for the current iid).
+\item \textbf{Learner Timeout:} Learner uses this timeout to sync its state with acceptors to learn the accepted values for iids that it might have missed.
+\end{enumerate}
+
+\subsection {Caveats:}
+According to the original implementation of \texttt{libfastpaxos} for the protocol to make progress,
+\begin{enumerate}
+\item the message delays should not be of the same order for phase1 and phase2 timeouts.(delay $<<$ timeout interval)
+\item when running in simulator, the number of messages that can be processed by each server on each tick should be proportional to the total number of messages per instance which is $O(N^2)$, where $N$ is the number of paxos servers.
+\end{enumerate}
+
+\section{Limitations and Corner Cases:}
 \begin{enumerate}
 \item Our paxos server system implementation does not count client as a learner, so client has no information about the granted $iids$ and next iid to try. That's the reason for client proposing value through proposers and not directly to acceptors.
 
 \item If a client times out and tries a different proposer but the previous request of client succeeds and the new proposer fails to receive the update for that request, it will re-propose the value with new $iid$. One possible solution for this is for proposer to sync with acceptors to learn about the different requests for this client. Since we maintain a finite size log, we couldn't implement this in given time.
+\end{enumerate}
+
+\section {Future Work:}
+\begin{enumerate}
+\item \textbf{Smart Learners:} \texttt{Libfastpaxos} is using the fixed timeout intervals to detect the conflicts which is not optimal and can be optimized by making learners report conflicts to the leader as soon as they detect the conflict condition (multiple values being learned for same iid and quorum is not possible for any of the values).
+\item Currently when a clients connects to a proposer that is already working on another request, the proposer drop the client's request without responding anything. Client eventually timeout and retries a random proposer. This could be optimized by buffering the client requests at the proposer or sending back a fail message so that client can continue with another proposer without waiting for the timeout.
 \end{enumerate}
 
 \begin{thebibliography}{100} 
